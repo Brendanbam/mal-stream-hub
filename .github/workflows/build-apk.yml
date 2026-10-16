@@ -73,8 +73,8 @@ jobs:
                   applicationId "com.anikoto.malhub"
                   minSdk 26
                   targetSdk 34
-                  versionCode 1
-                  versionName "1.0"
+                  versionCode 2
+                  versionName "1.1"
               }
 
               compileOptions {
@@ -101,9 +101,10 @@ jobs:
 
           cat <<'EOF' > app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+          <manifest xmlns:android="http://schemas.android.org/apk/res/android">
 
               <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
               <application
                   android:label="Anikoto MAL Hub"
@@ -112,6 +113,7 @@ jobs:
                   android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
                   <activity
                       android:name=".MainActivity"
+                      android:configChanges="orientation|screenSize|keyboardHidden"
                       android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -125,27 +127,318 @@ jobs:
           cat <<'EOF' > app/src/main/java/com/anikoto/malhub/MainActivity.kt
           package com.anikoto.malhub
 
+          import android.annotation.SuppressLint
           import android.app.Activity
+          import android.app.AlertDialog
+          import android.graphics.Color
           import android.os.Bundle
+          import android.view.Gravity
+          import android.view.View
+          import android.view.ViewGroup
+          import android.webkit.CookieManager
+          import android.webkit.WebChromeClient
+          import android.webkit.WebResourceRequest
+          import android.webkit.WebResourceResponse
+          import android.webkit.WebSettings
+          import android.webkit.WebView
+          import android.webkit.WebViewClient
+          import android.widget.Button
+          import android.widget.EditText
+          import android.widget.FrameLayout
           import android.widget.LinearLayout
-          import android.widget.TextView
+          import java.io.ByteArrayInputStream
+          import java.net.URLEncoder
 
           class MainActivity : Activity() {
+
+              private lateinit var anikotoWebView: WebView
+              private lateinit var malWebView: WebView
+              private lateinit var webContainer: FrameLayout
+              private lateinit var fullscreenContainer: FrameLayout
+              private var customView: View? = null
+              private var customViewCallback: WebChromeClient.CustomViewCallback? = null
+              private var activeTab = 0 // 0 = Anikoto, 1 = MAL
+
+              private var anikotoBaseUrl = "https://anikoto.tv"
+              private val malBaseUrl = "https://myanimelist.net"
+
+              private val adHosts = listOf(
+                  "doubleclick.net", "googlesyndication.com", "adservice.google",
+                  "popads.net", "popcash.net", "propellerads.com", "adsterra.com",
+                  "exoclick.com", "juicyads.com", "trafficjunky.net", "onclickads.net",
+                  "hilltopads.net", "clickadu.com", "ad-maven.com", "galaksion.com"
+              )
+
+              @SuppressLint("SetJavaScriptEnabled")
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
 
-                  val layout = LinearLayout(this).apply {
+                  val prefs = getSharedPreferences("anikoto_prefs", MODE_PRIVATE)
+                  anikotoBaseUrl = prefs.getString("anikoto_domain", "https://anikoto.tv") ?: "https://anikoto.tv"
+
+                  val rootLayout = FrameLayout(this).apply {
+                      setBackgroundColor(Color.parseColor("#121212"))
+                  }
+
+                  val mainColumn = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
-                      setPadding(32, 32, 32, 32)
+                      layoutParams = FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.MATCH_PARENT
+                      )
                   }
 
-                  val title = TextView(this).apply {
-                      text = "Anikoto MAL Hub"
-                      textSize = 24f
+                  // Top Navigation Bar
+                  val navBar = LinearLayout(this).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      setBackgroundColor(Color.parseColor("#1E1E24"))
+                      setPadding(16, 12, 16, 12)
+                      gravity = Gravity.CENTER_VERTICAL
                   }
 
-                  layout.addView(title)
-                  setContentView(layout)
+                  val btnAnikoto = createNavButton("▶ Anikoto", true)
+                  val btnMal = createNavButton("★ MAL", false)
+                  val btnSyncSearch = createNavButton("🔍 Find on MAL", false)
+                  val btnDomain = createNavButton("⚙", false)
+
+                  btnAnikoto.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.2f).apply { marginEnd = 8 }
+                  btnMal.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 }
+                  btnSyncSearch.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.3f).apply { marginEnd = 8 }
+                  btnDomain.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+
+                  navBar.addView(btnAnikoto)
+                  navBar.addView(btnMal)
+                  navBar.addView(btnSyncSearch)
+                  navBar.addView(btnDomain)
+
+                  // WebViews Container
+                  webContainer = FrameLayout(this).apply {
+                      layoutParams = LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          0,
+                          1f
+                      )
+                  }
+
+                  fullscreenContainer = FrameLayout(this).apply {
+                      layoutParams = FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.MATCH_PARENT
+                      )
+                      setBackgroundColor(Color.BLACK)
+                      visibility = View.GONE
+                  }
+
+                  anikotoWebView = createConfiguredWebView(isAnikoto = true)
+                  malWebView = createConfiguredWebView(isAnikoto = false)
+                  malWebView.visibility = View.GONE
+
+                  webContainer.addView(anikotoWebView)
+                  webContainer.addView(malWebView)
+
+                  mainColumn.addView(navBar)
+                  mainColumn.addView(webContainer)
+
+                  rootLayout.addView(mainColumn)
+                  rootLayout.addView(fullscreenContainer)
+
+                  setContentView(rootLayout)
+
+                  // Load initial pages
+                  anikotoWebView.loadUrl(anikotoBaseUrl)
+                  malWebView.loadUrl("$malBaseUrl/animelist")
+
+                  // Tab Switching Logic
+                  btnAnikoto.setOnClickListener {
+                      switchTab(0, btnAnikoto, btnMal)
+                  }
+
+                  btnMal.setOnClickListener {
+                      switchTab(1, btnAnikoto, btnMal)
+                  }
+
+                  // Smart Search on MAL based on current Anikoto page title
+                  btnSyncSearch.setOnClickListener {
+                      val rawTitle = anikotoWebView.title ?: ""
+                      val cleanedTitle = rawTitle
+                          .replace(Regex("(?i)watch|online|free|anikoto|episode\\s*\\d+|sub|dub|-|\\|"), " ")
+                          .trim()
+                          .replace(Regex("\\s+"), " ")
+
+                      showMalLookupDialog(cleanedTitle) { query ->
+                          val encoded = URLEncoder.encode(query, "UTF-8")
+                          malWebView.loadUrl("$malBaseUrl/anime.php?q=$encoded&cat=anime")
+                          switchTab(1, btnAnikoto, btnMal)
+                      }
+                  }
+
+                  // Domain Switcher (in case Anikoto mirror changes)
+                  btnDomain.setOnClickListener {
+                      showDomainDialog(prefs)
+                  }
+              }
+
+              private fun switchTab(tab: Int, btnAnikoto: Button, btnMal: Button) {
+                  activeTab = tab
+                  if (tab == 0) {
+                      anikotoWebView.visibility = View.VISIBLE
+                      malWebView.visibility = View.GONE
+                      btnAnikoto.setBackgroundColor(Color.parseColor("#6C5CE7"))
+                      btnMal.setBackgroundColor(Color.parseColor("#2D2D35"))
+                  } else {
+                      anikotoWebView.visibility = View.GONE
+                      malWebView.visibility = View.VISIBLE
+                      btnAnikoto.setBackgroundColor(Color.parseColor("#2D2D35"))
+                      btnMal.setBackgroundColor(Color.parseColor("#2E51A2"))
+                  }
+              }
+
+              private fun createNavButton(label: String, selected: Boolean): Button {
+                  return Button(this).apply {
+                      text = label
+                      textSize = 12f
+                      setTextColor(Color.WHITE)
+                      isAllCaps = false
+                      setPadding(16, 12, 16, 12)
+                      setBackgroundColor(
+                          if (selected) Color.parseColor("#6C5CE7")
+                          else Color.parseColor("#2D2D35")
+                      )
+                  }
+              }
+
+              @SuppressLint("SetJavaScriptEnabled")
+              private fun createConfiguredWebView(isAnikoto: Boolean): WebView {
+                  return WebView(this).apply {
+                      layoutParams = FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.MATCH_PARENT
+                      )
+                      setBackgroundColor(Color.parseColor("#121212"))
+
+                      CookieManager.getInstance().setAcceptCookie(true)
+                      CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+
+                      settings.apply {
+                          javaScriptEnabled = true
+                          domStorageEnabled = true
+                          databaseEnabled = true
+                          mediaPlaybackRequiresUserGesture = false
+                          mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                          useWideViewPort = true
+                          loadWithOverviewMode = true
+                          setSupportMultipleWindows(false) // Prevents popup windows
+                          javaScriptCanOpenWindowsAutomatically = false
+                          userAgentString = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                      }
+
+                      webViewClient = object : WebViewClient() {
+                          override fun shouldInterceptRequest(
+                              view: WebView?,
+                              request: WebResourceRequest?
+                          ): WebResourceResponse? {
+                              val url = request?.url?.toString()?.lowercase() ?: return null
+                              if (adHosts.any { url.contains(it) }) {
+                                  return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+                              }
+                              return super.shouldInterceptRequest(view, request)
+                          }
+
+                          override fun shouldOverrideUrlLoading(
+                              view: WebView?,
+                              request: WebResourceRequest?
+                          ): Boolean {
+                              val url = request?.url?.toString() ?: return false
+                              if (adHosts.any { url.lowercase().contains(it) }) {
+                                  return true // Block ad redirects
+                              }
+                              if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                                  return true // Block intent:// or market:// spam redirects
+                              }
+                              return false
+                          }
+
+                          override fun onPageFinished(view: WebView?, url: String?) {
+                              super.onPageFinished(view, url)
+                              CookieManager.getInstance().flush()
+                          }
+                      }
+
+                      webChromeClient = object : WebChromeClient() {
+                          override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                              if (customView != null) {
+                                  callback?.onCustomViewHidden()
+                                  return
+                              }
+                              customView = view
+                              customViewCallback = callback
+                              fullscreenContainer.addView(view)
+                              fullscreenContainer.visibility = View.VISIBLE
+                          }
+
+                          override fun onHideCustomView() {
+                              if (customView == null) return
+                              fullscreenContainer.removeView(customView)
+                              fullscreenContainer.visibility = View.GONE
+                              customView = null
+                              customViewCallback?.onCustomViewHidden()
+                          }
+                      }
+                  }
+              }
+
+              private fun showMalLookupDialog(prefill: String, onSearch: (String) -> Unit) {
+                  val input = EditText(this).apply {
+                      setText(prefill)
+                      hint = "Enter anime title..."
+                      setPadding(40, 30, 40, 30)
+                  }
+                  AlertDialog.Builder(this)
+                      .setTitle("Search Anime on MyAnimeList")
+                      .setView(input)
+                      .setPositiveButton("Search MAL") { _, _ ->
+                          val query = input.text.toString().trim()
+                          if (query.isNotEmpty()) onSearch(query)
+                      }
+                      .setNegativeButton("Cancel", null)
+                      .show()
+              }
+
+              private fun showDomainDialog(prefs: android.content.SharedPreferences) {
+                  val input = EditText(this).apply {
+                      setText(anikotoBaseUrl)
+                      hint = "https://anikoto.tv"
+                      setPadding(40, 30, 40, 30)
+                  }
+                  AlertDialog.Builder(this)
+                      .setTitle("Streaming Domain")
+                      .setMessage("Update the streaming domain if Anikoto changes its mirror (.tv, .to, .bz, etc.):")
+                      .setView(input)
+                      .setPositiveButton("Save & Reload") { _, _ ->
+                          var newUrl = input.text.toString().trim()
+                          if (!newUrl.startsWith("http")) newUrl = "https://$newUrl"
+                          anikotoBaseUrl = newUrl
+                          prefs.edit().putString("anikoto_domain", newUrl).apply()
+                          anikotoWebView.loadUrl(newUrl)
+                      }
+                      .setNegativeButton("Cancel", null)
+                      .show()
+              }
+
+              override fun onBackPressed() {
+                  if (customView != null) {
+                      fullscreenContainer.removeView(customView)
+                      fullscreenContainer.visibility = View.GONE
+                      customView = null
+                      customViewCallback?.onCustomViewHidden()
+                      return
+                  }
+                  val currentWebView = if (activeTab == 0) anikotoWebView else malWebView
+                  if (currentWebView.canGoBack()) {
+                      currentWebView.goBack()
+                  } else {
+                      super.onBackPressed()
+                  }
               }
           }
           EOF
