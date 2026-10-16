@@ -28,10 +28,9 @@ jobs:
         shell: bash
         run: |
           set -e
-
           mkdir -p app/src/main/java/com/anikoto/malhub
 
-          cat <<'EOF' > settings.gradle
+          cat << 'EOF' | sed 's/^          //' > settings.gradle
           pluginManagement {
               repositories {
                   google()
@@ -39,7 +38,6 @@ jobs:
                   gradlePluginPortal()
               }
           }
-
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
               repositories {
@@ -47,19 +45,18 @@ jobs:
                   mavenCentral()
               }
           }
-
           rootProject.name = "AnikotoMalHub"
           include(":app")
           EOF
 
-          cat <<'EOF' > build.gradle
+          cat << 'EOF' | sed 's/^          //' > build.gradle
           plugins {
               id 'com.android.application' version '8.2.2' apply false
               id 'org.jetbrains.kotlin.android' version '1.9.22' apply false
           }
           EOF
 
-          cat <<'EOF' > app/build.gradle
+          cat << 'EOF' | sed 's/^          //' > app/build.gradle
           plugins {
               id 'com.android.application'
               id 'org.jetbrains.kotlin.android'
@@ -89,19 +86,18 @@ jobs:
               buildTypes {
                   release {
                       minifyEnabled false
-                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
                   }
               }
           }
 
           dependencies {
-              implementation "org.jetbrains.kotlin:kotlin-stdlib"
+              implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.22"
           }
           EOF
 
-          cat <<'EOF' > app/src/main/AndroidManifest.xml
+          cat << 'EOF' | sed 's/^          //' > app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.org/apk/res/android">
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -124,12 +120,13 @@ jobs:
           </manifest>
           EOF
 
-          cat <<'EOF' > app/src/main/java/com/anikoto/malhub/MainActivity.kt
+          cat << 'EOF' | sed 's/^          //' > app/src/main/java/com/anikoto/malhub/MainActivity.kt
           package com.anikoto.malhub
 
           import android.annotation.SuppressLint
           import android.app.Activity
           import android.app.AlertDialog
+          import android.content.SharedPreferences
           import android.graphics.Color
           import android.os.Bundle
           import android.view.Gravity
@@ -157,7 +154,7 @@ jobs:
               private lateinit var fullscreenContainer: FrameLayout
               private var customView: View? = null
               private var customViewCallback: WebChromeClient.CustomViewCallback? = null
-              private var activeTab = 0 // 0 = Anikoto, 1 = MAL
+              private var activeTab = 0
 
               private var anikotoBaseUrl = "https://anikoto.tv"
               private val malBaseUrl = "https://myanimelist.net"
@@ -188,7 +185,6 @@ jobs:
                       )
                   }
 
-                  // Top Navigation Bar
                   val navBar = LinearLayout(this).apply {
                       orientation = LinearLayout.HORIZONTAL
                       setBackgroundColor(Color.parseColor("#1E1E24"))
@@ -196,22 +192,21 @@ jobs:
                       gravity = Gravity.CENTER_VERTICAL
                   }
 
-                  val btnAnikoto = createNavButton("▶ Anikoto", true)
-                  val btnMal = createNavButton("★ MAL", false)
-                  val btnSyncSearch = createNavButton("🔍 Find on MAL", false)
-                  val btnDomain = createNavButton("⚙", false)
+                  val btnAnikoto = createNavButton("Anikoto", true)
+                  val btnMal = createNavButton("MAL", false)
+                  val btnSyncSearch = createNavButton("Find on MAL", false)
+                  val btnDomain = createNavButton("Domain", false)
 
-                  btnAnikoto.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.2f).apply { marginEnd = 8 }
-                  btnMal.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 }
+                  btnAnikoto.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.1f).apply { marginEnd = 8 }
+                  btnMal.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.9f).apply { marginEnd = 8 }
                   btnSyncSearch.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.3f).apply { marginEnd = 8 }
-                  btnDomain.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                  btnDomain.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f)
 
                   navBar.addView(btnAnikoto)
                   navBar.addView(btnMal)
                   navBar.addView(btnSyncSearch)
                   navBar.addView(btnDomain)
 
-                  // WebViews Container
                   webContainer = FrameLayout(this).apply {
                       layoutParams = LinearLayout.LayoutParams(
                           ViewGroup.LayoutParams.MATCH_PARENT,
@@ -229,8 +224,8 @@ jobs:
                       visibility = View.GONE
                   }
 
-                  anikotoWebView = createConfiguredWebView(isAnikoto = true)
-                  malWebView = createConfiguredWebView(isAnikoto = false)
+                  anikotoWebView = createConfiguredWebView()
+                  malWebView = createConfiguredWebView()
                   malWebView.visibility = View.GONE
 
                   webContainer.addView(anikotoWebView)
@@ -244,11 +239,9 @@ jobs:
 
                   setContentView(rootLayout)
 
-                  // Load initial pages
                   anikotoWebView.loadUrl(anikotoBaseUrl)
-                  malWebView.loadUrl("$malBaseUrl/animelist")
+                  malWebView.loadUrl(malBaseUrl + "/animelist")
 
-                  // Tab Switching Logic
                   btnAnikoto.setOnClickListener {
                       switchTab(0, btnAnikoto, btnMal)
                   }
@@ -257,7 +250,6 @@ jobs:
                       switchTab(1, btnAnikoto, btnMal)
                   }
 
-                  // Smart Search on MAL based on current Anikoto page title
                   btnSyncSearch.setOnClickListener {
                       val rawTitle = anikotoWebView.title ?: ""
                       val cleanedTitle = rawTitle
@@ -267,12 +259,11 @@ jobs:
 
                       showMalLookupDialog(cleanedTitle) { query ->
                           val encoded = URLEncoder.encode(query, "UTF-8")
-                          malWebView.loadUrl("$malBaseUrl/anime.php?q=$encoded&cat=anime")
+                          malWebView.loadUrl(malBaseUrl + "/anime.php?q=" + encoded + "&cat=anime")
                           switchTab(1, btnAnikoto, btnMal)
                       }
                   }
 
-                  // Domain Switcher (in case Anikoto mirror changes)
                   btnDomain.setOnClickListener {
                       showDomainDialog(prefs)
                   }
@@ -296,10 +287,10 @@ jobs:
               private fun createNavButton(label: String, selected: Boolean): Button {
                   return Button(this).apply {
                       text = label
-                      textSize = 12f
+                      textSize = 11f
                       setTextColor(Color.WHITE)
                       isAllCaps = false
-                      setPadding(16, 12, 16, 12)
+                      setPadding(12, 10, 12, 10)
                       setBackgroundColor(
                           if (selected) Color.parseColor("#6C5CE7")
                           else Color.parseColor("#2D2D35")
@@ -308,7 +299,7 @@ jobs:
               }
 
               @SuppressLint("SetJavaScriptEnabled")
-              private fun createConfiguredWebView(isAnikoto: Boolean): WebView {
+              private fun createConfiguredWebView(): WebView {
                   return WebView(this).apply {
                       layoutParams = FrameLayout.LayoutParams(
                           ViewGroup.LayoutParams.MATCH_PARENT,
@@ -327,7 +318,7 @@ jobs:
                           mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                           useWideViewPort = true
                           loadWithOverviewMode = true
-                          setSupportMultipleWindows(false) // Prevents popup windows
+                          setSupportMultipleWindows(false)
                           javaScriptCanOpenWindowsAutomatically = false
                           userAgentString = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
                       }
@@ -350,10 +341,10 @@ jobs:
                           ): Boolean {
                               val url = request?.url?.toString() ?: return false
                               if (adHosts.any { url.lowercase().contains(it) }) {
-                                  return true // Block ad redirects
+                                  return true
                               }
                               if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                                  return true // Block intent:// or market:// spam redirects
+                                  return true
                               }
                               return false
                           }
@@ -404,7 +395,7 @@ jobs:
                       .show()
               }
 
-              private fun showDomainDialog(prefs: android.content.SharedPreferences) {
+              private fun showDomainDialog(prefs: SharedPreferences) {
                   val input = EditText(this).apply {
                       setText(anikotoBaseUrl)
                       hint = "https://anikoto.tv"
@@ -416,7 +407,7 @@ jobs:
                       .setView(input)
                       .setPositiveButton("Save & Reload") { _, _ ->
                           var newUrl = input.text.toString().trim()
-                          if (!newUrl.startsWith("http")) newUrl = "https://$newUrl"
+                          if (!newUrl.startsWith("http")) newUrl = "https://" + newUrl
                           anikotoBaseUrl = newUrl
                           prefs.edit().putString("anikoto_domain", newUrl).apply()
                           anikotoWebView.loadUrl(newUrl)
@@ -425,6 +416,7 @@ jobs:
                       .show()
               }
 
+              @Deprecated("Deprecated in Java")
               override fun onBackPressed() {
                   if (customView != null) {
                       fullscreenContainer.removeView(customView)
@@ -447,14 +439,12 @@ jobs:
         shell: bash
         run: |
           set -e
-
           if [ -f ./gradlew ]; then
             chmod +x ./gradlew
-            ./gradlew assembleDebug --no-daemon --stacktrace
+            ./gradlew assembleDebug --no-daemon
           else
-            gradle assembleDebug --no-daemon --stacktrace
+            gradle assembleDebug --no-daemon
           fi
-
           echo "Generated APKs:"
           find app/build/outputs -type f -maxdepth 5 -print
 
