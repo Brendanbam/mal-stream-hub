@@ -188,7 +188,6 @@ jobs:
                       )
                   }
 
-                  // Top Quick-Action Bar
                   val topBar = LinearLayout(this).apply {
                       orientation = LinearLayout.HORIZONTAL
                       gravity = Gravity.CENTER_VERTICAL
@@ -224,7 +223,6 @@ jobs:
                   topBar.addView(lockBtn)
                   topBar.addView(plusOneBtn)
 
-                  // Stream Tab Container
                   streamViewContainer = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
                       layoutParams = LinearLayout.LayoutParams(
@@ -248,7 +246,6 @@ jobs:
                   setupWebViewClients()
                   streamViewContainer.addView(webView)
 
-                  // MAL Tab Container
                   malTabContainer = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
                       visibility = View.GONE
@@ -288,7 +285,6 @@ jobs:
                   malTabContainer.addView(malControls)
                   malTabContainer.addView(scroll)
 
-                  // Bottom Navigation Bar
                   val bottomNav = LinearLayout(this).apply {
                       orientation = LinearLayout.HORIZONTAL
                       setBackgroundColor(Color.parseColor("#181B28"))
@@ -471,4 +467,7 @@ jobs:
 
                   AlertDialog.Builder(this)
                       .setTitle("Settings")
-         
+                      .setView(layout)
+                      .setPositiveButton("Save") { _, _ ->
+                          prefs.edit()
+                              .putStri
